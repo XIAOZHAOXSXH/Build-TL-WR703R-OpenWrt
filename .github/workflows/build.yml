@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: wr703n-openwrt-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   OPENWRT_REPO: https://github.com/openwrt/openwrt.git
@@ -46,11 +46,8 @@ jobs:
       - name: Inject Packages And Patches
         run: |
           git clone --depth 1 "${EASYTIER_REPO}" "${OPENWRT_DIR}/package/easytier-feed"
-          mkdir -p "${OPENWRT_DIR}/files"
-          cp -a files/. "${OPENWRT_DIR}/files/"
-          chmod +x "${OPENWRT_DIR}/files/etc/uci-defaults/99-easytier-tmp-path"
           cd "${OPENWRT_DIR}"
-          git apply "${GITHUB_WORKSPACE}/patches/openwrt/0001-ath79-wr703n-8m64m-and-basic-profile.patch"
+          git apply "${GITHUB_WORKSPACE}/patches/openwrt/0001-ath79-wr703n-8m64m.patch"
 
       - name: Prepare Feeds And Config
         run: |
@@ -77,11 +74,16 @@ jobs:
           find "${OPENWRT_DIR}/bin/targets/ath79/tiny" -maxdepth 1 -type f \
             \( -name '*wr703n*' -o -name 'sha256sums' -o -name 'profiles.json' \) \
             -exec cp -f {} "${OPENWRT_DIR}/release/" \;
-          find "${OPENWRT_DIR}/bin/packages" -type f \
-            \( -name '*easytier*.ipk' -o -name '*luci-app-easytier*.ipk' \) \
-            -exec cp -f {} "${OPENWRT_DIR}/release/" \;
+          python3 scripts/collect_release_ipks.py \
+            --bin-packages "${OPENWRT_DIR}/bin/packages" \
+            --output "${OPENWRT_DIR}/release" \
+            --seed luci-light \
+            --seed luci-app-easytier \
+            --seed easytier \
+            --seed wget-ssl \
+            --seed unzip
           cp .config "${OPENWRT_DIR}/release/wr703n-8m64m.config"
-          cp patches/openwrt/0001-ath79-wr703n-8m64m-and-basic-profile.patch "${OPENWRT_DIR}/release/"
+          cp patches/openwrt/0001-ath79-wr703n-8m64m.patch "${OPENWRT_DIR}/release/"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
