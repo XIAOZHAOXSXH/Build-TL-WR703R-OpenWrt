@@ -1,0 +1,104 @@
+name: Build WR703N OpenWrt
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wr703n-openwrt-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  OPENWRT_REPO: https://github.com/openwrt/openwrt.git
+  OPENWRT_BRANCH: openwrt-24.10
+  OPENWRT_DIR: openwrt
+  EASYTIER_REPO: https://github.com/EasyTier/luci-app-easytier.git
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
+            bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext \
+            gcc-multilib g++-multilib genisoimage git gperf help2man intltool libelf-dev \
+            libfuse-dev libglib2.0-dev libgmp-dev libltdl-dev libmpc-dev libmpfr-dev \
+            libncurses5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz \
+            mkisofs ninja-build p7zip p7zip-full patch pkgconf python3 python3-pip \
+            python3-ply python3-docutils python3-setuptools qemu-utils rsync scons \
+            squashfs-tools subversion swig texinfo uglifyjs unzip vim wget xxd zlib1g-dev
+
+      - name: Clone OpenWrt
+        run: |
+          git clone --depth 1 --branch "${OPENWRT_BRANCH}" "${OPENWRT_REPO}" "${OPENWRT_DIR}"
+
+      - name: Inject Packages And Patches
+        run: |
+          git clone --depth 1 "${EASYTIER_REPO}" "${OPENWRT_DIR}/package/easytier-feed"
+          mkdir -p "${OPENWRT_DIR}/files"
+          cp -a files/. "${OPENWRT_DIR}/files/"
+          chmod +x "${OPENWRT_DIR}/files/etc/uci-defaults/99-easytier-tmp-path"
+          cd "${OPENWRT_DIR}"
+          git apply "${GITHUB_WORKSPACE}/patches/openwrt/0001-ath79-wr703n-8m64m-and-basic-profile.patch"
+
+      - name: Prepare Feeds And Config
+        run: |
+          cp .config "${OPENWRT_DIR}/.config"
+          cd "${OPENWRT_DIR}"
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          make defconfig
+          ./scripts/diffconfig.sh || true
+
+      - name: Download Sources
+        run: |
+          cd "${OPENWRT_DIR}"
+          make download -j8
+
+      - name: Build Firmware
+        run: |
+          cd "${OPENWRT_DIR}"
+          make -j"$(nproc)" V=s
+
+      - name: Collect Release Files
+        run: |
+          mkdir -p "${OPENWRT_DIR}/release"
+          find "${OPENWRT_DIR}/bin/targets/ath79/tiny" -maxdepth 1 -type f \
+            \( -name '*wr703n*' -o -name 'sha256sums' -o -name 'profiles.json' \) \
+            -exec cp -f {} "${OPENWRT_DIR}/release/" \;
+          find "${OPENWRT_DIR}/bin/packages" -type f \
+            \( -name '*easytier*.ipk' -o -name '*luci-app-easytier*.ipk' \) \
+            -exec cp -f {} "${OPENWRT_DIR}/release/" \;
+          cp .config "${OPENWRT_DIR}/release/wr703n-8m64m.config"
+          cp patches/openwrt/0001-ath79-wr703n-8m64m-and-basic-profile.patch "${OPENWRT_DIR}/release/"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wr703n-openwrt
+          path: openwrt/release/*
+          if-no-files-found: error
+
+      - name: Generate Release Tag
+        id: meta
+        run: |
+          echo "tag=wr703n-8m64m-$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.tag }}
+          files: openwrt/release/*
+          generate_release_notes: true
