@@ -12,6 +12,12 @@ from pathlib import Path
 DEP_VERSION_RE = re.compile(r"\s*\([^)]*\)")
 
 
+def append_continuation(current: dict[str, str], current_key: str, value: str) -> None:
+    previous = current.get(current_key, "")
+    separator = "\n" if previous else ""
+    current[current_key] = f"{previous}{separator}{value.strip()}"
+
+
 def parse_packages_file(path: Path) -> list[dict[str, str]]:
     entries: list[dict[str, str]] = []
     current: dict[str, str] = {}
@@ -26,7 +32,12 @@ def parse_packages_file(path: Path) -> list[dict[str, str]]:
             continue
 
         if raw_line[0].isspace() and current_key:
-            current[current_key] += raw_line.strip()
+            append_continuation(current, current_key, raw_line)
+            continue
+
+        if ":" not in raw_line:
+            if current_key:
+                append_continuation(current, current_key, raw_line)
             continue
 
         key, value = raw_line.split(":", 1)

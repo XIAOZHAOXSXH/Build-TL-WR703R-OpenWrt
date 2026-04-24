@@ -26,6 +26,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate Helper Scripts
+        run: |
+          python3 -m unittest discover -s tests -p 'test_*.py'
+
       - name: Install Dependencies
         run: |
           sudo apt-get update
